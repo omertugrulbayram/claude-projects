@@ -1,9 +1,8 @@
-// Heads-up fixed-limit Five-Card Draw against one opponent, with lucky-item hooks.
+// Tek rakibe karşı sabit limitli Five-Card Draw ve şans eşyası etkileri.
 (function (LC) {
   const C = LC.cards;
   const D = LC.data;
   const L = LC.life;
-  const HAND_MINUTES = 12;
   const MAX_DISCARD = 3;
   const RAISE_CAP = 3; // bet + two raises per round
 
@@ -24,24 +23,19 @@
     G.cash -= v.buyIn;
     G.session = {
       venueId, stack: v.buyIn, invested: v.buyIn, npc: null, hand: null, button: false,
-      lossStreak: 0, bentUsed: false, sleeveUsed: false, log: [], hands: 0, lastNpc: null,
+      lossStreak: 0, bentUsed: false, log: [], hands: 0, lastNpc: null,
     };
-    G.stats.sessions++;
-    G.clock += L.TRAVEL;
-    L.log(G, `Bought in at ${v.name} for ${L.money(v.buyIn)}.`, 'plain');
-    tlog(G.session, `You buy ${L.money(v.buyIn)} in chips. Ante ${L.money(v.ante)}, bets ${L.money(v.bets[0])}/${L.money(v.bets[1])}.`);
     seatNpc(G);
   }
 
   function rebuy(G) {
     const S = G.session;
     const v = venueOf(S.venueId);
-    if (G.cash < v.buyIn) return { ok: false, msg: `A rebuy is ${L.money(v.buyIn)}. You have ${L.money(G.cash)}.` };
+    if (G.cash < v.buyIn) return { ok: false, msg: `Tekrar girmek ${L.money(v.buyIn)}. Sende ${L.money(G.cash)} var.` };
     G.cash -= v.buyIn;
     S.stack += v.buyIn;
     S.invested += v.buyIn;
-    tlog(S, `Rebuy. Another ${L.money(v.buyIn)} goes across the felt.`, 'bad');
-    L.log(G, `Rebought at ${v.name} for ${L.money(v.buyIn)}.`, 'bad');
+    tlog(S, `Tekrar girdin: ${L.money(v.buyIn)}.`, 'bad');
     return { ok: true };
   }
 
@@ -49,7 +43,7 @@
     const S = G.session;
     const v = venueOf(S.venueId);
     let id;
-    if (L.isNight(G.clock) && v.tier >= 1 && Math.random() < 0.3 && S.lastNpc !== 'zero') id = 'zero';
+    if (S.hands >= 5 && v.tier >= 1 && Math.random() < 0.25 && S.lastNpc !== 'zero') id = 'zero';
     else {
       let pool = v.pool.filter((p) => p !== S.lastNpc);
       if (!pool.length) pool = v.pool;
@@ -60,45 +54,32 @@
     const rec = (G.npcs[id] = G.npcs[id] || { won: 0, lost: 0, met: 0 });
     rec.met++;
     const def = D.NPCS[id];
-    tlog(S, rec.met === 1 ? `${def.name} sits down with ${L.money(stack)}. ${def.tag}` : `${def.name} is back, with ${L.money(stack)}.`);
+    tlog(S, `${def.name} masaya oturdu.`);
   }
 
   function waitForPlayer(G) {
-    G.clock += 20;
     seatNpc(G);
   }
 
-  function cashOut(G, reason) {
+  function cashOut(G) {
     const S = G.session;
-    const v = venueOf(S.venueId);
     const pnl = S.stack - S.invested;
     G.cash += S.stack;
     if (S.stack === 0) G.stats.busts++;
     G.stats.peakCash = Math.max(G.stats.peakCash, G.cash);
-    const why = reason === 'closing' ? `${v.name} is closing. ` : '';
-    const text = `${why}You leave ${v.name} ${pnl >= 0 ? 'up' : 'down'} ${L.money(Math.abs(pnl))}.`;
-    L.log(G, text, pnl >= 0 ? 'good' : 'bad');
-    G.clock += L.TRAVEL;
     G.session = null;
-    return { pnl, text };
+    return { pnl };
   }
 
-  function caught(G, how) {
+  function caught(G) {
     const S = G.session;
     const v = venueOf(S.venueId);
-    const lost = S.stack + (S.hand && S.hand.phase !== 'done' ? S.hand.contrib.p : 0);
-    const illegal = L.equippedIds(G).filter((id) => D.ITEMS[id].rarity === 'illegal');
-    for (const [slot, uid] of Object.entries(G.equipped)) {
-      const it = L.itemByUid(G, uid);
-      if (it && D.ITEMS[it.id].rarity === 'illegal') L.removeItem(G, uid);
-      void slot;
-    }
+    const illegal = G.items.filter((i) => D.ITEMS[i.id].rarity === 'kaçak');
+    illegal.forEach((i) => L.removeItem(G, i.uid));
     G.bans[v.id] = G.day + 3;
     G.rep = Math.max(0, G.rep - 5);
-    const names = illegal.map((id) => D.ITEMS[id].name).join(', ') || 'your sleeve';
-    const text = `Two men in blazers take your arms before the ${how === 'sleeve' ? 'Ace hits the felt' : 'next card is dealt'}. They find ${names}. Your ${L.money(lost)} in chips stays with the house. BANNED FROM ${v.name.toUpperCase()} until day ${G.day + 3}. Reputation -5.`;
-    L.log(G, text, 'bad');
-    G.clock += 30;
+    const names = illegal.map((i) => D.ITEMS[i.id].name).join(', ');
+    const text = `Güvenlik seni kolundan tuttu ve üstünde ${names} buldu. ${L.money(S.stack)} değerindeki fişlerine el konuldu. ${v.name} seni ${G.day + 3}. güne kadar içeri almayacak. İtibar -5.`;
     G.session = null;
     return { caught: true, text };
   }
@@ -165,17 +146,15 @@
   function startHand(G) {
     const S = G.session;
     const v = venueOf(S.venueId);
-    if (!S.npc) return { ok: false, msg: 'The seat across from you is empty.' };
-    if (S.stack < v.ante) return { ok: false, msg: 'Not enough chips for the ante.' };
-    if (G.energy < 3) return { ok: false, msg: 'Your eyes won’t focus on the cards. Go home.' };
-    if (G.clock + HAND_MINUTES >= v.close) return { closing: true };
+    if (!S.npc) return { ok: false, msg: 'Karşındaki sandalye boş.' };
+    if (S.stack < v.ante) return { ok: false, msg: 'Ante için fişin yetmiyor.' };
+    if (G.energy < D.HAND_ENERGY) return { ok: false, msg: 'Gözlerin kartlara odaklanmıyor. Eve git ve uyu.', tired: true };
 
     let heat = 0;
-    for (const id of L.equippedIds(G)) heat += D.ITEMS[id].heat || 0;
-    if (heat > 0 && Math.random() < heat * v.security) return caught(G, 'items');
+    for (const id of L.itemIds(G)) heat += D.ITEMS[id].heat || 0;
+    if (heat > 0 && Math.random() < heat * v.security) return caught(G);
 
-    G.clock += HAND_MINUTES;
-    G.energy = Math.max(0, G.energy - 2);
+    G.energy = Math.max(0, G.energy - D.HAND_ENERGY);
     S.button = !S.button;
     S.hands++;
     G.stats.hands++;
@@ -184,7 +163,7 @@
     const H = {
       deck, p: deck.splice(0, 5), n: deck.splice(0, 5), pot: 0, contrib: { p: 0, n: 0 },
       phase: 'bet1', selected: [], ringActive: false, marked: -1, tell: null, drew: { p: null, n: null },
-      lowStack: S.stack < v.buyIn * 0.2, result: null, round: null, notes: [], sleeveIdx: -1,
+      lowStack: S.stack < v.buyIn * 0.2, result: null, round: null, notes: [],
     };
     S.hand = H;
     H.round = newRound(v.bets[0], S.button ? 'n' : 'p');
@@ -192,7 +171,7 @@
     // antes (not part of the betting round)
     if (L.has(G, 'lucky_scarf') && chance(G, 0.25)) {
       H.pot += v.ante;
-      H.notes.push('Lucky Scarf: the house covers your ante.');
+      H.notes.push('Uğurlu Atkı: ante\'yi kasa ödedi.');
     } else {
       const a = takeChips(G, 'p', v.ante);
       H.pot += a; H.contrib.p += a;
@@ -203,7 +182,7 @@
     if (L.has(G, 'dead_mans_ring') && S.lossStreak >= 3) {
       H.ringActive = true;
       S.lossStreak = 0;
-      H.notes.push("Dead Man's Ring goes cold on your finger. Spades are coming.");
+      H.notes.push('Ölü Adamın Yüzüğü soğudu. Maçalar geliyor.');
     }
     if (L.has(G, 'marked_cards')) H.marked = Math.floor(Math.random() * 5);
     H.round.toAct = nextActor(G, H.round.first);
@@ -216,27 +195,27 @@
     const S = G.session;
     const H = S.hand;
     const R = H.round;
-    const name = w === 'p' ? 'You' : npcDef(S).name;
+    const name = w === 'p' ? 'Sen' : npcDef(S).name;
     const toCall = R.cur - R.rc[w];
     if (action === 'fold') {
-      tlog(S, `${name} ${w === 'p' ? 'fold' : 'folds'}.`);
+      tlog(S, `${name}: çekil.`);
       return settle(G, other(w), 'fold');
     }
     if (action === 'check') {
       R.acted[w] = true;
-      tlog(S, `${name} ${w === 'p' ? 'check' : 'checks'}.`);
+      tlog(S, `${name}: pas.`);
     } else if (action === 'call') {
       const a = put(G, w, toCall);
       R.acted[w] = true;
-      tlog(S, `${name} ${w === 'p' ? 'call' : 'calls'} ${L.money(a)}${allIn(G, w) ? ', all in' : ''}.`);
+      tlog(S, `${name}: gördü ${L.money(a)}${allIn(G, w) ? ' (hepsi)' : ''}.`);
     } else if (action === 'bet' || action === 'raise') {
       const a = put(G, w, toCall + R.size);
       R.cur = Math.max(R.cur, R.rc[w]);
       R.bets++;
       R.acted[w] = true;
       R.acted[other(w)] = false;
-      const verb = R.bets === 1 ? (w === 'p' ? 'bet' : 'bets') : (w === 'p' ? 'raise' : 'raises');
-      tlog(S, `${name} ${verb} ${L.money(a)}${allIn(G, w) ? ', all in' : ''}.`, w === 'n' ? 'npc' : 'plain');
+      const verb = R.bets === 1 ? 'bahis' : 'artırdı';
+      tlog(S, `${name}: ${verb} ${L.money(a)}${allIn(G, w) ? ' (hepsi)' : ''}.`, w === 'n' ? 'npc' : 'plain');
     }
     if (w === 'n') readTell(G, action);
     R.toAct = nextActor(G, other(w));
@@ -277,7 +256,7 @@
     idxs.forEach((i) => { H.p[i] = drawCard(H); });
     H.drew.p = idxs.length;
     H.fresh = idxs;
-    tlog(S, idxs.length ? `You draw ${idxs.length}.` : 'You stand pat.');
+    tlog(S, idxs.length ? `${idxs.length} kart değiştirdin.` : 'Kart değiştirmedin.');
 
     if (idxs.length && L.has(G, 'rabbit_foot') && chance(G, 0.12)) rabbitFoot(G);
 
@@ -287,7 +266,7 @@
     if (def.patBluff && out.length >= 2 && Math.random() < 0.3) { out = []; H.npcPatBluff = true; }
     out.forEach((i) => { H.n[i] = H.deck.pop(); });
     H.drew.n = out.length;
-    tlog(S, out.length ? `${def.name} draws ${out.length}.` : `${def.name} stands pat.`, 'npc');
+    tlog(S, out.length ? `${def.name} ${out.length} kart değiştirdi.` : `${def.name} kart değiştirmedi.`, 'npc');
     H.selected = [];
     advance(G);
   }
@@ -305,27 +284,10 @@
       trial[worst] = H.deck[k];
       if (C.evaluate(trial).cat > before.cat) {
         H.p[worst] = H.deck.splice(k, 1)[0];
-        tlog(G.session, "Rabbit's Foot twitches in your pocket. One card changes.", 'item');
+        tlog(G.session, 'Tavşan Ayağı kıpırdadı. Bir kartın değişti.', 'item');
         return;
       }
     }
-  }
-
-  function useSleeve(G, idx) {
-    const S = G.session;
-    const H = S.hand;
-    const v = venueOf(S.venueId);
-    if (!L.has(G, 'ace_sleeve') || S.sleeveUsed || H.phase !== 'draw') return { ok: false };
-    const suits = C.SUITS.filter((s) => H.deck.some((c) => c.r === 14 && c.s === s));
-    if (!suits.length) return { ok: false, msg: 'Every Ace is already on the table.' };
-    S.sleeveUsed = true;
-    if (Math.random() < D.ITEMS.ace_sleeve.useHeat * v.security) return caught(G, 'sleeve');
-    const s = suits[Math.floor(Math.random() * suits.length)];
-    H.deck.splice(H.deck.findIndex((c) => c.r === 14 && c.s === s), 1);
-    H.p[idx] = { r: 14, s };
-    H.selected = H.selected.filter((i) => i !== idx);
-    tlog(S, 'You palm an Ace. Nobody blinks.', 'item');
-    return { ok: true };
   }
 
   // ---------- opponent brain ----------
@@ -414,18 +376,13 @@
       S.stack += H.pot;
       const net = H.pot - H.contrib.p;
       let bonus = 0;
-      if (L.has(G, 'night_owl') && L.isNight(G.clock)) {
-        const b = Math.round(net * 0.25);
-        if (b > 0) { bonus += b; res.notes.push(`Night Owl: +${L.money(b)}`); }
-      }
       if (L.has(G, 'last_cigarette') && H.lowStack && pEv.cat >= 4 && reason === 'showdown') {
         const b = Math.round(net * 1.5);
         bonus += b;
-        res.notes.push(`Last Cigarette: x2.5, +${L.money(b)}`);
+        res.notes.push(`Son Sigara: x2.5, +${L.money(b)}`);
         if (Math.random() < 0.25) {
-          const uid = G.equipped.POCKET;
-          L.removeItem(G, uid);
-          res.notes.push('The Last Cigarette burns down to your fingers. Gone.');
+          L.removeItem(G, G.items.find((i) => i.id === 'last_cigarette').uid);
+          res.notes.push('Son Sigara parmaklarına kadar yandı. Bitti.');
         }
       }
       S.stack += bonus;
@@ -436,15 +393,15 @@
       G.stats.won++;
       if (reason === 'showdown' && S.npc.id === 'zero') {
         G.flags.zeroWins = (G.flags.zeroWins || 0) + 1;
-        res.notes.push(`Zero nods at you. (${Math.min(5, G.flags.zeroWins)}/5)`);
+        res.notes.push(`Zero sana başıyla selam verdi. (${Math.min(5, G.flags.zeroWins)}/5)`);
         if (G.flags.zeroWins === 5) {
           const got = L.addItem(G, 'black_joker');
-          res.notes.push(got ? 'Zero leaves a single card face down in front of you: the BLACK JOKER.' : 'Zero leaves you a card, but you have nowhere to keep it. It vanishes.');
+          res.notes.push(got ? 'Zero önüne kapalı bir kart bıraktı: KARA JOKER.' : 'Zero sana bir kart bıraktı ama cebinde yer yok. Kayboldu.');
         }
       }
       if (H.pot >= v.bets[1] * 3 && def.tilt > 0) {
         S.npc.tilt = Math.min(1, S.npc.tilt + def.tilt);
-        if (def.tilt >= 0.5) res.notes.push(`${def.name} is steaming. Tilt.`);
+        if (def.tilt >= 0.5) res.notes.push(`${def.name} sinirlendi. Tilt!`);
       }
     } else if (winner === 'n') {
       S.npc.stack += H.pot;
@@ -455,7 +412,7 @@
         if (chance(G, 0.2)) {
           const back = Math.round(H.contrib.p * 0.5);
           S.stack += back;
-          res.notes.push(`Bent Coin: ${L.money(back)} comes back to you.`);
+          res.notes.push(`Eğri Bozuk Para: ${L.money(back)} geri geldi.`);
         }
       }
       S.npc.tilt *= 0.5;
@@ -466,21 +423,14 @@
     }
     if (winner !== 'p') S.npc.tilt *= 0.8;
 
-    const line = reason === 'fold'
-      ? (winner === 'p' ? `You take the pot: ${L.money(res.pot)}.` : `${def.name} takes the pot: ${L.money(res.pot)}.`)
-      : winner === 'split'
-        ? `Split pot. Both of you hold ${C.describe(pEv)}.`
-        : winner === 'p'
-          ? `Your ${C.describe(pEv)} beats ${C.describe(nEv)}. +${L.money(res.pot)}.`
-          : `${def.name}'s ${C.describe(nEv)} beats your ${C.describe(pEv)}.`;
+    const line = winner === 'p' ? `Kazandın: +${L.money(res.pot)}.` : winner === 'n' ? `${def.name} kazandı.` : 'Berabere, pot bölündü.';
     tlog(S, line, winner === 'p' ? 'good' : winner === 'n' ? 'bad' : 'plain');
     res.notes.forEach((n) => tlog(S, n, 'item'));
 
     if (S.npc.stack < v.ante) {
       res.npcBust = true;
       G.rep += 2 * (v.tier + 1) * repMult;
-      tlog(S, `${def.name} is out of chips and leaves the table.`, 'good');
-      L.log(G, `You busted ${def.name} at ${v.name}.`, 'good');
+      tlog(S, `${def.name} bütün fişlerini kaybetti ve kalktı.`, 'good');
       S.lastNpc = S.npc.id;
       S.npc = null;
     }
@@ -489,7 +439,7 @@
   }
 
   LC.poker = {
-    HAND_MINUTES, MAX_DISCARD, venueOf, startSession, rebuy, seatNpc, waitForPlayer, cashOut,
-    startHand, act, options, drawPlayer, useSleeve, npcTurn, npcDecide,
+    MAX_DISCARD, venueOf, startSession, rebuy, seatNpc, waitForPlayer, cashOut,
+    startHand, act, options, drawPlayer, npcTurn, npcDecide,
   };
 })(typeof window !== 'undefined' ? (window.LC = window.LC || {}) : (globalThis.LC = globalThis.LC || {}));

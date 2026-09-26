@@ -2,8 +2,10 @@
 (function (LC) {
   const SUITS = ['♠', '♥', '♦', '♣'];
   const FACE = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' };
-  const RANK_WORD = { 2: 'Twos', 3: 'Threes', 4: 'Fours', 5: 'Fives', 6: 'Sixes', 7: 'Sevens', 8: 'Eights', 9: 'Nines', 10: 'Tens', 11: 'Jacks', 12: 'Queens', 13: 'Kings', 14: 'Aces' };
-  const CATS = ['High Card', 'Pair', 'Two Pair', 'Three of a Kind', 'Straight', 'Flush', 'Full House', 'Four of a Kind', 'Straight Flush'];
+  const RANK_WORD = { 11: 'Vale', 12: 'Kız', 13: 'Papaz', 14: 'As' };
+  const CATS = ['Yüksek Kart', 'Per', 'Döper', 'Üçlü', 'Kent', 'Renk', 'Full House', 'Kare', 'Sıralı Renk'];
+  // Kısa açıklamalar, el sıralaması ekranı için (zayıftan güçlüye).
+  const CAT_HINTS = ['Hiçbir şey tutmadı', 'Aynı sayıdan 2 kart', 'İki ayrı per', 'Aynı sayıdan 3 kart', 'Sıralı 5 kart', 'Aynı türden 5 kart', 'Üçlü + per', 'Aynı sayıdan 4 kart', 'Aynı türden sıralı 5 kart'];
 
   const rankLabel = (r) => FACE[r] || String(r);
   const isRed = (c) => c.s === '♥' || c.s === '♦';
@@ -60,17 +62,15 @@
   }
 
   function describe(ev) {
+    const w = (r) => RANK_WORD[r] || String(r);
     const t = ev.score[1];
     switch (ev.cat) {
-      case 0: return `${rankLabel(t)}-High`;
-      case 1: return `Pair of ${RANK_WORD[t]}`;
-      case 2: return `${RANK_WORD[t]} & ${RANK_WORD[ev.score[2]]}`;
-      case 3: return `Three ${RANK_WORD[t]}`;
-      case 4: return `Straight, ${rankLabel(t)}-High`;
-      case 5: return `Flush, ${rankLabel(t)}-High`;
-      case 6: return `${RANK_WORD[t]} Full of ${RANK_WORD[ev.score[2]]}`;
-      case 7: return `Four ${RANK_WORD[t]}`;
-      case 8: return t === 14 ? 'Royal Flush' : 'Straight Flush';
+      case 0: return `Yüksek Kart (${w(t)})`;
+      case 1: return `${w(t)} Per`;
+      case 2: return `Döper (${w(t)} ve ${w(ev.score[2])})`;
+      case 3: return `Üçlü ${w(t)}`;
+      case 7: return `Kare ${w(t)}`;
+      case 8: return t === 14 ? 'Floş Royal' : 'Sıralı Renk';
     }
     return ev.name;
   }
@@ -146,5 +146,5 @@
     return out;
   }
 
-  LC.cards = { SUITS, CATS, rankLabel, isRed, same, newDeck, shuffle, evaluate, evaluateWild, compare, describe, strength, chooseDiscards, fourFlushOut, straightDrawOut };
+  LC.cards = { SUITS, CATS, CAT_HINTS, rankLabel, isRed, same, newDeck, shuffle, evaluate, evaluateWild, compare, describe, strength, chooseDiscards, fourFlushOut, straightDrawOut };
 })(typeof window !== 'undefined' ? (window.LC = window.LC || {}) : (globalThis.LC = globalThis.LC || {}));
