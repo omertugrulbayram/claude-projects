@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LAST CHIP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=VT323&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <div id="hud" class="hud" aria-live="polite"></div>
+  <main class="stage">
+    <div class="screen">
+      <canvas id="scene" width="192" height="108" aria-hidden="true"></canvas>
+      <div class="scanlines" aria-hidden="true"></div>
+    </div>
+    <section id="panel" class="panel"></section>
+  </main>
+  <aside class="sidebar">
+    <h4>Notebook</h4>
+    <ol id="log" class="log"></ol>
+  </aside>
+</div>
+<div id="modal"></div>
+<script src="js/cards.js"></script>
+<script src="js/data.js"></script>
+<script src="js/life.js"></script>
+<script src="js/poker.js"></script>
+<script src="js/scene.js"></script>
+<script src="js/ui.js"></script>
+<script>LC.ui.start();</script>
+</body>
+</html>
