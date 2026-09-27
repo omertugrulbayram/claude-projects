@@ -1,35 +1,52 @@
 # Kişisel Asistan
 
-Masaüstünde küçük bir pencerede çalışan, seni zamanla tanıyan, objektif analiz yapan,
-öneri veren ve **senin eğittiğin** kişisel asistan. Yapay zekâ olarak Claude (Anthropic API)
-kullanır; hafızası ve kişiliği tamamen senin bilgisayarında, düz dosyalarda durur.
+Masaüstünde küçük bir pencerede çalışan, seni zamanla tanıyan, objektif analiz yapan ve öneri veren
+kişisel asistan. **Yapay zekâ modeli tamamen senin bilgisayarında çalışır ve onu sen eğitirsin.**
+Hiçbir dış API'ye bağlanmaz, internet olmadan da çalışır.
 
 ## Nasıl çalışır?
 
-"Eğitim" burada modeli sıfırdan eğitmek değil. Hazır, güçlü bir modele her konuşmada şunlar verilir:
+```
+ Sen konuşursun ──► Yerel model (Ollama) ──► Cevap
+        │                                       │
+        │     👍 / 👎 düzelt / elle örnek         │
+        ▼                                       ▼
+   veri/ klasörü (hafıza, kişilik, sohbetler, geri bildirimler)
+        │
+        ▼  egitim/modeli_egit.bat
+   LoRA ince ayarı ──► "benim-asistanim" modeli ──► Ollama ──► asistan artık bunu kullanır
+```
 
-| Katman | Nerede | Kim yazar |
-|---|---|---|
-| **Kişilik & fikirler** — adı, üslubu, değerleri, nelere karşı çıkacağı | `veri/kisilik.md` (Eğitim sekmesi) | Sen |
-| **Senin hakkında bildikleri** — hedeflerin, alışkanlıkların, işin, değerlerin… | `veri/hafiza.json` → `bilgiler` | Asistan sohbet ederken kendisi kaydeder, sen de ekleyip silebilirsin |
-| **Kendi görüşleri** — sende fark ettiği örüntüler, güçlü yanlar, kör noktalar | `veri/hafiza.json` → `gorusler` | Asistan kendisi oluşturur |
-| **Dersler** — 👎 ile yaptığın düzeltmeler | `veri/hafiza.json` → `dersler` | Sen |
-| Sohbet kayıtları | `veri/sohbetler/GÜN.jsonl` | Otomatik |
+1. **Başlangıç:** Açık kaynaklı bir temel model (Qwen3 4B) kullanılır. Türkçe konuşabilir ama seni tanımaz.
+2. **Veri biriktirme:** Konuştukça her cevaba:
+   - **👍** verirsin → "böyle cevap ver" örneği olur,
+   - **👎 Düzelt** ile ideal cevabı yazarsın → model bunu öğrenir,
+   - **Eğitim** sekmesinde doğrudan örnek yazarsın ("şu soruya şöyle cevap ver") → modelin
+     **fikirlerini ve üslubunu** sen belirlersin.
+3. **Eğitim:** Yeterli örnek birikince (en az ~100, ideali 500+) `egitim/modeli_egit.bat` çalıştırırsın.
+   Temel model senin verinle ince ayar yapılır. Böylece sana özgü, ağırlıkları senin diskinde duran
+   **benim-asistanim** modeli oluşur.
+4. **Tekrarla:** Asistan yeni modelini otomatik kullanır. Konuşmaya ve düzeltmeye devam ettikçe
+   birkaç haftada bir yeniden eğitirsin ve model her seferinde sana daha çok benzer.
 
-Yani asistanı üç şekilde eğitirsin:
-1. **Eğitim sekmesinde** kişiliğini ve fikirlerini yazarak ("Bana karşı sert ol", "Para konusunda tutucu ol", "Sabah rutinini önemse"...).
-2. **Onunla konuşarak** — anlattıkça seni öğrenir ve hafızasına yazar (cevabın altında 🧠 ile görürsün).
-3. **👎 Düzelt** butonuyla — yanlış bulduğun cevabı düzeltirsin, bu kalıcı bir ders olur.
+Bunlara ek olarak, eğitimden bağımsız olarak her gün çalışan bir **hafıza** da var. Asistan
+konuşmalardan senin hakkında öğrendiklerini ve kendi görüşlerini kaydeder. Bunları **Hafıza**
+sekmesinde görüp düzeltebilirsin. Hafıza anında etkilidir; eğitim ise modelin karakterini kalıcı
+olarak değiştirir.
 
-Yeni bilgiler, dersler ve kişilik değişiklikleri **yeni oturumda** tam olarak devreye girer ("Yeni oturum" butonu).
+> **Neden sıfırdan model eğitmiyoruz?** Sıfırdan bir dil modeli eğitmek milyarlarca sayfa metin ve
+> milyonlarca dolarlık donanım ister. Kişisel verinle eğitilen sıfırdan bir model Türkçe cümle bile
+> kuramaz. Dünyada kişisel asistanlar bu yüzden hep aynı yolla yapılır: dili bilen açık kaynaklı
+> bir modeli alıp kendi verinle ince ayar (fine-tuning) yaparsın. Ortaya çıkan model tamamen senindir.
 
 ## Kurulum (bir kerelik)
 
-1. **Python 3.10+** kur: <https://www.python.org/downloads/> (Windows'ta kurulumda *"Add Python to PATH"* kutusunu işaretle).
-2. **API anahtarı al:** <https://console.anthropic.com> → hesap aç → *API Keys* → yeni anahtar oluştur (kullandıkça ücretlendirilir).
-3. Anahtarı ortam değişkeni olarak kaydet:
-   - **Windows** (Komut İstemi): `setx ANTHROPIC_API_KEY "sk-ant-..."` → pencereyi kapatıp yeniden aç.
-   - **macOS / Linux:** `~/.zshrc` veya `~/.bashrc` dosyasına `export ANTHROPIC_API_KEY="sk-ant-..."` ekle.
+1. **Python 3.10+** kur: <https://www.python.org/downloads/> (Windows'ta kurarken *"Add Python to PATH"* kutusunu işaretle).
+2. **Ollama** kur: <https://ollama.com/download>. Modelleri bilgisayarında çalıştıran programdır.
+3. Temel modeli indir. Komut İstemi'ni aç ve şunu yaz (yaklaşık 2.5 GB):
+   ```
+   ollama pull qwen3:4b
+   ```
 4. Bu klasörü bilgisayarına indir.
 
 ## Çalıştırma
@@ -37,42 +54,77 @@ Yeni bilgiler, dersler ve kişilik değişiklikleri **yeni oturumda** tam olarak
 - **Windows:** `baslat.bat` dosyasına çift tıkla.
 - **macOS / Linux:** `./baslat.sh`
 
-İlk açılışta gerekli paket otomatik kurulur. Chrome veya Edge varsa asistan ayrı, küçük bir
-uygulama penceresi olarak açılır; yoksa tarayıcında açılır (`http://127.0.0.1:8765`).
+Chrome veya Edge varsa asistan ayrı, küçük bir uygulama penceresinde açılır.
 
-### Bilgisayar açılınca otomatik başlasın
+**Bilgisayar açılınca otomatik başlasın:** `Win + R` tuşlarına bas, `shell:startup` yaz ve açılan
+klasöre `baslat.bat` için bir **kısayol** koy.
 
-- **Windows:** `Win + R` → `shell:startup` yaz → açılan klasöre `baslat.bat` için bir **kısayol** koy.
-- **macOS:** Sistem Ayarları → Genel → Giriş Öğeleri → `baslat.sh`'yi ekle.
+## Modelini eğitmek
 
-## İlk hafta için öneri
+### Gereken donanım
 
-1. Eğitim sekmesinde kişiliği kendine göre yaz.
-2. **"Beni tanı"** ile başla, soruları dürüstçe cevapla.
-3. Her akşam **"Günlük check-in"** yap (2-3 dakika).
-4. Hafta sonunda **"Beni analiz et"** — hafıza büyüdükçe analizler keskinleşir.
-5. Hafıza sekmesini ara ara kontrol et; yanlış kaydedilen bilgiyi sil.
+| Temel model | Ekran kartı (NVIDIA) | Not |
+|---|---|---|
+| `Qwen/Qwen3-4B-Instruct-2507` (varsayılan) | 16 GB+ VRAM (RTX 4080/4090/5080…) | En iyi kalite |
+| `Qwen/Qwen2.5-1.5B-Instruct` | 8 GB+ VRAM (RTX 3060/4060…) | Daha küçük kartlar için |
+
+Ekran kartın yoksa eğitim işlemcide çok yavaş olur (günler sürebilir). Sadece sohbet için ekran
+kartı gerekmez; Ollama işlemcide de çalışır.
+
+### Adımlar
+
+1. Asistanla konuş, 👍 ver, düzelt, **Eğitim** sekmesinde örnek ekle. Sayacı aynı sekmede görürsün.
+2. Asistanı kapat, sonra `egitim\modeli_egit.bat` dosyasına çift tıkla.
+   Daha küçük ekran kartı için Komut İstemi'nde şunu çalıştır:
+   ```
+   egitim\modeli_egit.bat --temel Qwen/Qwen2.5-1.5B-Instruct
+   ```
+   İlk çalıştırmada gerekli kütüphaneler (~5 GB) ve temel modelin ağırlıkları indirilir.
+   Toplam süre, örnek sayısına göre birkaç dakika ile bir saat arasındadır.
+3. Bittiğinde asistanı yeniden başlat. Eğitim sekmesinde *"kendi eğittiğin modeli kullanıyorsun"* yazar.
+
+`modeli_egit.bat` üç adımı sırayla çalıştırır. İstersen adımları tek tek de çalıştırabilirsin:
+
+| Adım | Komut | Ne yapar |
+|---|---|---|
+| 1 | `python egitim/veri_hazirla.py` | 👍, düzeltmeler ve elle örneklerden `egitim/veri.jsonl` dosyasını oluşturur |
+| 2 | `python egitim/egit.py` | LoRA ile ince ayar yapar ve modeli `egitim/cikti/birlesik` klasörüne kaydeder |
+| 3 | `python egitim/ollamaya_yukle.py` | Modeli GGUF biçimine çevirir, sıkıştırır ve Ollama'ya `benim-asistanim` adıyla yükler |
+
+`egit.py` ayarları: `--epoch` (varsayılan 3), `--lora-r` (varsayılan 16; büyüdükçe model daha çok
+değişir), `--ogrenme-hizi`. Model verini ezberlemeye başlarsa (aynı cümleleri tekrar ederse)
+`--epoch 2` ile yeniden dene.
+
+### İyi eğitim için ipuçları
+
+- **Nitelik, nicelikten önemlidir.** 200 özenle yazılmış ideal cevap, 2000 rastgele cevaptan iyidir.
+- Modelin fikir sahibi olmasını istiyorsan, fikirlerini **Eğitim → Örnek öğret** ile açıkça yaz.
+  Örneğin: *"Sence X mi Y mi?" → "Bence Y, çünkü..."*
+- Farklı konularda örnek ver: iş, sağlık, ilişkiler, para, günlük planlama, analiz talepleri.
+- **Beni analiz et** sorusuna nasıl bir analiz beklediğini birkaç kez elle yaz. Model analiz
+  tarzını buradan öğrenir.
 
 ## Ayarlar
 
 | Ortam değişkeni | Varsayılan | Açıklama |
 |---|---|---|
-| `ASISTAN_MODEL` | `claude-opus-5` | Kullanılacak Claude modeli. Daha ucuz için `claude-sonnet-5`. |
-| `ASISTAN_PORT` | `8765` | Yerel sunucu portu. |
-
-Asistan, isteklerde Anthropic'in *sunucu tarafı yedek model* özelliğini (`fallbacks: "default"`)
-kullanır: bir istek güvenlik filtresine takılırsa aynı istek otomatik olarak önerilen başka bir
-modelde yeniden denenir.
+| `ASISTAN_TEMEL_MODEL` | `qwen3:4b` | Henüz kendi modelini eğitmediysen kullanılan Ollama modeli |
+| `ASISTAN_MODEL` | *(otomatik)* | Belirli bir modeli zorla (normalde `benim-asistanim` varsa o kullanılır) |
+| `ASISTAN_PORT` | `8765` | Arayüzün yerel portu |
+| `ASISTAN_VERI` | `veri/` | Verilerin saklandığı klasör |
 
 ## Gizlilik
 
-- Hafıza, kişilik ve sohbet kayıtları sadece bu klasördeki `veri/` dizininde durur; hiçbir yere yüklenmez
-  (`.gitignore` sayesinde git'e de gönderilmez).
-- Her mesajda kişilik ve hafıza, cevap üretmek için Anthropic API'ye gönderilir.
-- Sunucu sadece kendi bilgisayarından erişilebilir (`127.0.0.1`).
+- Model, hafıza, kişilik, sohbetler ve geri bildirimler **sadece senin bilgisayarında** durur.
+  Sohbet sırasında internete hiçbir şey gönderilmez.
+- İnternet yalnızca kurulumda gerekir: Ollama ve temel modelin indirilmesi, eğitimde de kütüphaneler,
+  temel model ağırlıkları ve llama.cpp dönüştürücüsü.
+- `veri/` ve eğitim çıktıları `.gitignore` dosyasında listelidir, git'e gönderilmez.
 - Yedek almak için `veri/` klasörünü kopyalaman yeterli.
 
 ## Sınırlar
 
-Bu asistan bir terapist, doktor veya avukat değildir. Analizleri senin ona anlattıklarına dayanır —
-ne kadar dürüst ve düzenli anlatırsan o kadar isabetli olur.
+- 4B boyutunda yerel bir model, büyük bulut modelleri kadar derin analiz yapamaz. Asıl gücü sana
+  özgü olmasıdır ve eğittikçe gelişir. Daha güçlü bir bilgisayarın varsa daha büyük bir temel modelle
+  eğitebilirsin, örneğin 24 GB VRAM ile `--temel Qwen/Qwen2.5-7B-Instruct`.
+- Bu asistan bir terapist, doktor veya avukat değildir. Analizleri ona anlattıklarına dayanır.

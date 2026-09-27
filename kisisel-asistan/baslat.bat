@@ -1,7 +1,4 @@
 @echo off
 cd /d "%~dp0"
-if not exist .venv (
-  python -m venv .venv
-  .venv\Scripts\pip install -r requirements.txt
-)
-.venv\Scripts\python asistan.py
+python asistan.py
+if errorlevel 1 pause

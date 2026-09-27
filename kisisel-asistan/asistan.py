@@ -1,31 +1,41 @@
-"""Kişisel Asistan — masaüstünde çalışan, seni tanıyan ve senin eğittiğin asistan.
+"""Kişisel Asistan — tamamen senin bilgisayarında çalışan, senin eğittiğin asistan.
 
+Yapay zekâ modeli Ollama ile yerelde çalışır; hiçbir dış API'ye bağlanmaz.
 Çalıştırma:  python asistan.py
-Tüm veriler bu klasördeki `veri/` dizininde, senin bilgisayarında saklanır.
+Tüm veriler bu klasördeki `veri/` dizininde saklanır.
 """
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 import uuid
 import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-import anthropic
-
 KLASOR = Path(__file__).resolve().parent
-VERI = KLASOR / "veri"
+VERI = Path(os.environ.get("ASISTAN_VERI", KLASOR / "veri"))
 HAFIZA_DOSYASI = VERI / "hafiza.json"
 KISILIK_DOSYASI = VERI / "kisilik.md"
 SOHBET_KLASORU = VERI / "sohbetler"
+GERI_BILDIRIM_DOSYASI = VERI / "geri_bildirim.jsonl"
+ORNEK_DOSYASI = VERI / "ornekler.jsonl"
 
-MODEL = os.environ.get("ASISTAN_MODEL", "claude-opus-5")
+OLLAMA = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+if not OLLAMA.startswith("http"):
+    OLLAMA = "http://" + OLLAMA
+KENDI_MODELIN = "benim-asistanim"  # egitim/ adımlarıyla oluşturulan, sana özel model
+TEMEL_MODEL = os.environ.get("ASISTAN_TEMEL_MODEL", "qwen3:4b")  # henüz eğitmediysen kullanılan model
 PORT = int(os.environ.get("ASISTAN_PORT", "8765"))
+GECMIS_UZUNLUGU = 6  # eğitim verisine her cevapla birlikte kaydedilen önceki mesaj sayısı
+PENCERE = 20  # modele gönderilen en fazla önceki mesaj (bağlam penceresini aşmamak için)
 
 VARSAYILAN_KISILIK = """# Asistanımın kişiliği ve görüşleri
 (Bu metni istediğin gibi değiştir — asistan her sohbette buna göre davranır.)
@@ -43,61 +53,67 @@ objektif analiz etmek ve ona gerçekten işe yarayan öneriler vermek.
 - Objektif ol. Kullanıcıyı memnun etmek için gerçeği yumuşatma; ama kırıcı da olma.
 - Gözlem ile yorumu ayır: "Bana şunu söyledin: ..." (gözlem) ile "Bundan şunu çıkarıyorum: ..." \
 (yorum) farklıdır. Yorumlarının ne kadar emin olduğunu belirt.
-- Analiz yaparken hafızandaki somut bilgilere dayan; veri azsa bunu söyle ve soru sor.
+- Analiz yaparken aşağıdaki bilgilere dayan; veri azsa bunu söyle ve soru sor.
 - Kendi fikrin olsun. Sorulduğunda "sana kalmış" deme; gerekçesiyle net bir görüş bildir.
 - Öneriler somut, küçük ve uygulanabilir olsun (ne, ne zaman, nasıl ölçülür).
 - Tıbbi, hukuki veya ciddi psikolojik konularda bir uzmana yönlendir; kriz belirtisi görürsen \
 profesyonel destek almasını öner.
+- Her zaman Türkçe cevap ver."""
 
-Hafıza araçları:
-- Kullanıcı hakkında kalıcı ve işe yarar yeni bir şey öğrendiğinde (hedef, alışkanlık, değer, \
-ilişki, iş, sağlık, tercih, önemli olay) `kullanici_bilgisi_kaydet` aracını kullan. Önemsiz veya \
-geçici şeyleri kaydetme; zaten hafızada olanı tekrar kaydetme.
-- Kullanıcı hakkında kendi görüşün oluştuğunda veya değiştiğinde (bir örüntü, güçlü yan, kör nokta) \
-`kendi_gorusunu_kaydet` aracını kullan. Bunlar senin zamanla gelişen fikirlerindir.
-- Araç kullandığını uzun uzun anlatma; sohbete doğal şekilde devam et."""
+CIKARIM_TALIMATI = """Aşağıda bir kullanıcı ile asistanının son konuşması ve asistanın kullanıcı \
+hakkında zaten bildikleri var. Görevin, konuşmadan kullanıcı hakkında KALICI ve İŞE YARAR yeni \
+bilgileri çıkarmak (hedef, alışkanlık, değer, ilişki, iş, sağlık, tercih, önemli olay).
 
-ARACLAR = [
-    {
-        "name": "kullanici_bilgisi_kaydet",
-        "description": "Kullanıcı hakkında öğrenilen kalıcı bir bilgiyi uzun süreli hafızaya kaydeder.",
-        "strict": True,
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "bilgi": {"type": "string", "description": "Tek cümlelik, kendi başına anlaşılır bilgi."},
-                "kategori": {
-                    "type": "string",
-                    "enum": ["kimlik", "hedef", "aliskanlik", "deger", "iliski", "is", "saglik", "tercih", "olay", "diger"],
+Kurallar:
+- Sadece kullanıcının kendisinin söylediklerine dayan; tahmin yürütme.
+- Zaten bilinenleri tekrar yazma. Geçici veya önemsiz şeyleri (selamlaşma, anlık ruh hali) yazma.
+- Her bilgi tek cümle ve kendi başına anlaşılır olsun, Türkçe yaz.
+- "gorus" alanına, yalnızca bu konuşmada kullanıcıda gerçekten dikkat çekici bir örüntü, güçlü yan \
+veya kör nokta fark ettiysen asistanın kendi görüşünü yaz; yoksa boş bırak.
+- Yeni bir şey yoksa boş liste döndür."""
+
+CIKARIM_SEMASI = {
+    "type": "object",
+    "properties": {
+        "bilgiler": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "bilgi": {"type": "string"},
+                    "kategori": {
+                        "type": "string",
+                        "enum": ["kimlik", "hedef", "aliskanlik", "deger", "iliski", "is", "saglik", "tercih", "olay", "diger"],
+                    },
                 },
+                "required": ["bilgi", "kategori"],
             },
-            "required": ["bilgi", "kategori"],
-            "additionalProperties": False,
         },
+        "gorus": {"type": "string"},
     },
-    {
-        "name": "kendi_gorusunu_kaydet",
-        "description": "Asistanın kullanıcı hakkındaki kendi görüşünü (örüntü, güçlü yan, kör nokta) kaydeder.",
-        "strict": True,
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "gorus": {"type": "string", "description": "Görüş ve kısa gerekçesi."},
-            },
-            "required": ["gorus"],
-            "additionalProperties": False,
-        },
-    },
-]
+    "required": ["bilgiler", "gorus"],
+}
 
-kilit = threading.Lock()
-istemci = anthropic.Anthropic()
+kilit = threading.Lock()        # sohbet oturumu için
+dosya_kilidi = threading.Lock()  # hafıza dosyası için (arka plan çıkarımı da yazar)
 
 
 # ---------------------------------------------------------------- veri katmanı
 
 def zaman():
     return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def jsonl_oku(dosya):
+    if not dosya.exists():
+        return []
+    return [json.loads(satir) for satir in dosya.read_text(encoding="utf-8").splitlines() if satir.strip()]
+
+
+def jsonl_ekle(dosya, kayit):
+    dosya.parent.mkdir(parents=True, exist_ok=True)
+    with dosya.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(kayit, ensure_ascii=False) + "\n")
 
 
 def hafiza_oku():
@@ -114,11 +130,19 @@ def hafiza_yaz(hafiza):
 
 
 def hafizaya_ekle(tur, kayit):
-    hafiza = hafiza_oku()
-    kayit = {"id": uuid.uuid4().hex[:8], "tarih": zaman(), **kayit}
-    hafiza[tur].append(kayit)
-    hafiza_yaz(hafiza)
+    with dosya_kilidi:
+        hafiza = hafiza_oku()
+        kayit = {"id": uuid.uuid4().hex[:8], "tarih": zaman(), **kayit}
+        hafiza[tur].append(kayit)
+        hafiza_yaz(hafiza)
     return kayit
+
+
+def hafizadan_sil(tur, kimlik):
+    with dosya_kilidi:
+        hafiza = hafiza_oku()
+        hafiza[tur] = [k for k in hafiza[tur] if k["id"] != kimlik]
+        hafiza_yaz(hafiza)
 
 
 def kisilik_oku():
@@ -128,106 +152,133 @@ def kisilik_oku():
     return KISILIK_DOSYASI.read_text(encoding="utf-8")
 
 
-def sohbet_gunlugune_yaz(rol, metin):
-    SOHBET_KLASORU.mkdir(parents=True, exist_ok=True)
-    dosya = SOHBET_KLASORU / f"{datetime.now():%Y-%m-%d}.jsonl"
-    with dosya.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({"zaman": zaman(), "rol": rol, "metin": metin}, ensure_ascii=False) + "\n")
-
-
-def sistem_istemi():
-    """Oturum başında bir kez kurulur; oturum içinde sabit kalır (önbellek için)."""
-    hafiza = hafiza_oku()
-    bilgiler = "\n".join(f"- [{b['kategori']}] {b['bilgi']} ({b['tarih']})" for b in hafiza["bilgiler"]) or "- (henüz yok)"
-    gorusler = "\n".join(f"- {g['gorus']} ({g['tarih']})" for g in hafiza["gorusler"]) or "- (henüz yok)"
+def sistem_metni(hafiza=None, kisilik=None):
+    """Modele verilen sistem mesajı. Eğitim verisi de aynı biçimi kullanır."""
+    hafiza = hafiza or hafiza_oku()
+    kisilik = kisilik if kisilik is not None else kisilik_oku()
+    bilgiler = "\n".join(f"- [{b['kategori']}] {b['bilgi']}" for b in hafiza["bilgiler"]) or "- (henüz yok)"
+    gorusler = "\n".join(f"- {g['gorus']}" for g in hafiza["gorusler"]) or "- (henüz yok)"
     dersler = "\n".join(f"- {d['ders']}" for d in hafiza["dersler"]) or "- (henüz yok)"
-    baglam = (
-        f"<kisilik_ve_egitim>\n{kisilik_oku()}\n</kisilik_ve_egitim>\n\n"
-        f"<kullanici_hakkinda_bildiklerin>\n{bilgiler}\n</kullanici_hakkinda_bildiklerin>\n\n"
-        f"<kendi_goruslerin>\n{gorusler}\n</kendi_goruslerin>\n\n"
-        f"<kullanicinin_duzeltmeleri>\nKullanıcı geçmişte cevaplarını şöyle düzeltti; bunlara mutlaka uy:\n{dersler}\n"
-        f"</kullanicinin_duzeltmeleri>\n\nOturum başlangıcı: {zaman()}"
+    return (
+        f"{TEMEL_TALIMAT}\n\n"
+        f"## Kişiliğin ve eğitimin\n{kisilik.strip()}\n\n"
+        f"## Kullanıcı hakkında bildiklerin\n{bilgiler}\n\n"
+        f"## Kullanıcı hakkındaki kendi görüşlerin\n{gorusler}\n\n"
+        f"## Kullanıcının koyduğu kurallar (mutlaka uy)\n{dersler}"
     )
-    return [
-        {"type": "text", "text": TEMEL_TALIMAT, "cache_control": {"type": "ephemeral"}},
-        {"type": "text", "text": baglam},
-    ]
+
+
+# ---------------------------------------------------------------- yerel model (Ollama)
+
+class ModelHatasi(Exception):
+    pass
+
+
+def ollama(yol, govde=None, zaman_asimi=600):
+    istek = urllib.request.Request(
+        OLLAMA + yol,
+        data=None if govde is None else json.dumps(govde).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(istek, timeout=zaman_asimi) as yanit:
+            return json.loads(yanit.read())
+    except urllib.error.HTTPError as hata:
+        ayrinti = hata.read().decode("utf-8", "replace")
+        raise ModelHatasi(f"Ollama hatası ({hata.code}): {ayrinti[:300]}") from hata
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as hata:
+        raise ModelHatasi("Ollama'ya bağlanılamadı. Ollama kurulu ve açık mı? (README → Kurulum)") from hata
+
+
+def aktif_model():
+    """Eğittiğin model varsa onu, yoksa temel modeli kullan."""
+    if os.environ.get("ASISTAN_MODEL"):
+        return os.environ["ASISTAN_MODEL"]
+    try:
+        adlar = {m["name"].split(":")[0] for m in ollama("/api/tags", zaman_asimi=5).get("models", [])}
+    except ModelHatasi:
+        return TEMEL_MODEL
+    return KENDI_MODELIN if KENDI_MODELIN in adlar else TEMEL_MODEL
+
+
+def dusunceyi_temizle(metin):
+    return re.sub(r"<think>.*?</think>", "", metin, flags=re.S).strip()
+
+
+def model_sor(mesajlar, bicim=None):
+    govde = {"model": aktif_model(), "messages": mesajlar, "stream": False, "think": False,
+             "options": {"num_ctx": 8192}}
+    if bicim:
+        govde["format"] = bicim
+        govde["options"]["temperature"] = 0
+    yanit = ollama("/api/chat", govde)
+    return dusunceyi_temizle(yanit["message"]["content"])
 
 
 # ---------------------------------------------------------------- sohbet
 
 class Oturum:
     def __init__(self):
-        self.sistem = sistem_istemi()
+        self.sistem = sistem_metni()  # oturum boyunca sabit
         self.mesajlar = []
 
 
 oturum = Oturum()
 
 
-def araci_calistir(ad, girdi):
-    if ad == "kullanici_bilgisi_kaydet":
-        kayit = hafizaya_ekle("bilgiler", {"bilgi": girdi["bilgi"], "kategori": girdi["kategori"]})
-        return f"Kaydedildi (id={kayit['id']})."
-    if ad == "kendi_gorusunu_kaydet":
-        kayit = hafizaya_ekle("gorusler", {"gorus": girdi["gorus"]})
-        return f"Kaydedildi (id={kayit['id']})."
-    raise ValueError(f"Bilinmeyen araç: {ad}")
-
-
 def cevap_al(kullanici_metni):
-    """Kullanıcı mesajını gönderir, araç döngüsünü yürütür; (cevap, kaydedilenler) döner."""
-    baslangic = len(oturum.mesajlar)
+    gecmis = oturum.mesajlar[-GECMIS_UZUNLUGU:]
+    mesajlar = [{"role": "system", "content": oturum.sistem}, *oturum.mesajlar[-PENCERE:],
+                {"role": "user", "content": kullanici_metni}]
+    cevap = model_sor(mesajlar)
+    oturum.mesajlar += [{"role": "user", "content": kullanici_metni}, {"role": "assistant", "content": cevap}]
+
+    kimlik = uuid.uuid4().hex[:10]
+    jsonl_ekle(SOHBET_KLASORU / f"{datetime.now():%Y-%m-%d}.jsonl", {
+        "id": kimlik, "zaman": zaman(), "model": aktif_model(),
+        "gecmis": gecmis, "soru": kullanici_metni, "cevap": cevap,
+    })
+    threading.Thread(target=hafizaya_cikar, args=(kullanici_metni, cevap), daemon=True).start()
+    return kimlik, cevap
+
+
+def hafizaya_cikar(soru, cevap):
+    """Arka planda: son konuşmadan kullanıcı hakkında yeni bilgileri çıkarıp hafızaya yaz."""
+    hafiza = hafiza_oku()
+    bilinenler = "\n".join(f"- {b['bilgi']}" for b in hafiza["bilgiler"]) or "- (hiçbir şey)"
+    gorusler = "\n".join(f"- {g['gorus']}" for g in hafiza["gorusler"]) or "- (henüz yok)"
     try:
-        return _cevap_dongusu(kullanici_metni)
-    except anthropic.APIError:
-        del oturum.mesajlar[baslangic:]  # yarım kalan turu geri al, geçmiş tutarlı kalsın
-        raise
+        ham = model_sor([
+            {"role": "system", "content": CIKARIM_TALIMATI},
+            {"role": "user", "content": f"Zaten bilinenler:\n{bilinenler}\n\n"
+                                        f"Asistanın mevcut görüşleri (tekrarlama):\n{gorusler}\n\nKullanıcı: {soru}\n\nAsistan: {cevap}"},
+        ], bicim=CIKARIM_SEMASI)
+        sonuc = json.loads(ham)
+        if not isinstance(sonuc, dict):
+            return
+    except (ModelHatasi, json.JSONDecodeError, KeyError):
+        return
+    mevcut = {b["bilgi"].casefold() for b in hafiza["bilgiler"]}
+    for b in sonuc.get("bilgiler", [])[:5]:
+        metin = str(b.get("bilgi", "")).strip()
+        if metin and metin.casefold() not in mevcut:
+            hafizaya_ekle("bilgiler", {"bilgi": metin, "kategori": b.get("kategori", "diger"), "kaynak": "asistan"})
+    gorus = str(sonuc.get("gorus", "")).strip()
+    if gorus and gorus.casefold() not in {g["gorus"].casefold() for g in hafiza["gorusler"]}:
+        hafizaya_ekle("gorusler", {"gorus": gorus})
 
 
-def _cevap_dongusu(kullanici_metni):
-    oturum.mesajlar.append({"role": "user", "content": kullanici_metni})
-    kaydedilenler = []
-
-    for _ in range(8):  # güvenlik sınırı: en fazla 8 araç turu
-        yanit = istemci.beta.messages.create(
-            model=MODEL,
-            max_tokens=16000,
-            thinking={"type": "adaptive"},
-            system=oturum.sistem,
-            tools=ARACLAR,
-            messages=oturum.mesajlar,
-            cache_control={"type": "ephemeral"},
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-        )
-        # Tüm içeriği (düşünme blokları dahil) aynen geçmişe ekle.
-        oturum.mesajlar.append({"role": "assistant", "content": yanit.content})
-
-        if yanit.stop_reason == "refusal":
-            return "Bu isteğe cevap veremiyorum. Farklı bir şekilde sormayı deneyebilirsin.", kaydedilenler
-
-        if yanit.stop_reason != "tool_use":
-            metin = "".join(b.text for b in yanit.content if b.type == "text").strip()
-            if yanit.stop_reason == "max_tokens":
-                metin += "\n\n(Cevap uzunluk sınırında kesildi.)"
-            sohbet_gunlugune_yaz("kullanici", kullanici_metni)
-            sohbet_gunlugune_yaz("asistan", metin)
-            return metin, kaydedilenler
-
-        sonuclar = []
-        for blok in yanit.content:
-            if blok.type != "tool_use":
-                continue
-            try:
-                icerik = araci_calistir(blok.name, blok.input)
-                kaydedilenler.append(next(iter(blok.input.values())))
-                sonuclar.append({"type": "tool_result", "tool_use_id": blok.id, "content": icerik})
-            except Exception as hata:  # araç hatası modele bildirilir
-                sonuclar.append({"type": "tool_result", "tool_use_id": blok.id, "content": str(hata), "is_error": True})
-        oturum.mesajlar.append({"role": "user", "content": sonuclar})
-
-    return "Çok fazla araç turu oldu, lütfen tekrar dene.", kaydedilenler
+def egitim_durumu():
+    kayitlar = [k for d in sorted(SOHBET_KLASORU.glob("*.jsonl")) for k in jsonl_oku(d)] if SOHBET_KLASORU.exists() else []
+    geri = {g["id"]: g for g in jsonl_oku(GERI_BILDIRIM_DOSYASI)}
+    return {
+        "model": aktif_model(),
+        "kendi_modelin_var": aktif_model() == KENDI_MODELIN,
+        "toplam_cevap": len(kayitlar),
+        "begenilen": sum(1 for g in geri.values() if g.get("iyi")),
+        "duzeltilen": sum(1 for g in geri.values() if g.get("ideal")),
+        "elle_ornek": len(jsonl_oku(ORNEK_DOSYASI)),
+    }
 
 
 # ---------------------------------------------------------------- HTTP sunucusu
@@ -260,6 +311,8 @@ class Isleyici(BaseHTTPRequestHandler):
             self._json(hafiza_oku())
         elif self.path == "/api/kisilik":
             self._json({"metin": kisilik_oku()})
+        elif self.path == "/api/egitim-durumu":
+            self._json(egitim_durumu())
         else:
             self._json({"hata": "bulunamadı"}, 404)
 
@@ -267,37 +320,42 @@ class Isleyici(BaseHTTPRequestHandler):
         global oturum
         veri = self._govde()
         try:
-            with kilit:
-                if self.path == "/api/sohbet":
-                    metin, kaydedilenler = cevap_al(veri["mesaj"])
-                    self._json({"cevap": metin, "kaydedilenler": kaydedilenler})
-                elif self.path == "/api/yeni-oturum":
+            if self.path == "/api/sohbet":
+                with kilit:
+                    kimlik, cevap = cevap_al(veri["mesaj"])
+                self._json({"id": kimlik, "cevap": cevap})
+            elif self.path == "/api/yeni-oturum":
+                with kilit:
                     oturum = Oturum()
-                    self._json({"tamam": True})
-                elif self.path == "/api/kisilik":
-                    KISILIK_DOSYASI.write_text(veri["metin"], encoding="utf-8")
-                    self._json({"tamam": True})
-                elif self.path == "/api/ders":
-                    hafizaya_ekle("dersler", {"ders": veri["ders"]})
-                    self._json({"tamam": True})
-                elif self.path == "/api/bilgi":
-                    hafizaya_ekle("bilgiler", {"bilgi": veri["bilgi"], "kategori": veri.get("kategori", "diger")})
-                    self._json({"tamam": True})
-                elif self.path == "/api/sil":
-                    hafiza = hafiza_oku()
-                    hafiza[veri["tur"]] = [k for k in hafiza[veri["tur"]] if k["id"] != veri["id"]]
-                    hafiza_yaz(hafiza)
-                    self._json({"tamam": True})
-                else:
-                    self._json({"hata": "bulunamadı"}, 404)
-        except anthropic.AuthenticationError:
-            self._json({"hata": "API anahtarı geçersiz veya eksik. README'deki kurulum adımlarına bak."}, 401)
-        except anthropic.RateLimitError:
-            self._json({"hata": "Çok sık istek gönderildi, biraz bekleyip tekrar dene."}, 429)
-        except anthropic.APIConnectionError:
-            self._json({"hata": "İnternet bağlantısı kurulamadı."}, 503)
-        except anthropic.APIStatusError as hata:
-            self._json({"hata": f"API hatası ({hata.status_code}): {hata.message}"}, 502)
+                self._json({"tamam": True})
+            elif self.path == "/api/kisilik":
+                KISILIK_DOSYASI.write_text(veri["metin"], encoding="utf-8")
+                self._json({"tamam": True})
+            elif self.path == "/api/geri-bildirim":
+                kayit = {"id": veri["id"], "zaman": zaman()}
+                if veri.get("iyi"):
+                    kayit["iyi"] = True
+                if veri.get("ideal", "").strip():
+                    kayit["ideal"] = veri["ideal"].strip()
+                jsonl_ekle(GERI_BILDIRIM_DOSYASI, kayit)
+                if veri.get("kural", "").strip():
+                    hafizaya_ekle("dersler", {"ders": veri["kural"].strip()})
+                self._json({"tamam": True})
+            elif self.path == "/api/ornek":
+                jsonl_ekle(ORNEK_DOSYASI, {"id": uuid.uuid4().hex[:10], "zaman": zaman(),
+                                           "soru": veri["soru"].strip(), "cevap": veri["cevap"].strip()})
+                self._json({"tamam": True})
+            elif self.path == "/api/bilgi":
+                hafizaya_ekle("bilgiler", {"bilgi": veri["bilgi"], "kategori": veri.get("kategori", "diger"), "kaynak": "sen"})
+                self._json({"tamam": True})
+            elif self.path == "/api/sil":
+                hafizadan_sil(veri["tur"], veri["id"])
+                self._json({"tamam": True})
+            else:
+                self._json({"hata": "bulunamadı"}, 404)
+        except ModelHatasi as hata:
+            self._json({"hata": str(hata)}, 503)
+
 
 def pencere_ac(adres):
     """Chrome/Edge varsa uygulama penceresi gibi aç, yoksa normal tarayıcıda aç."""
@@ -317,7 +375,7 @@ def main():
     kisilik_oku()
     sunucu = ThreadingHTTPServer(("127.0.0.1", PORT), Isleyici)
     adres = f"http://127.0.0.1:{PORT}/"
-    print(f"Kişisel asistan çalışıyor: {adres}  (kapatmak için Ctrl+C)")
+    print(f"Kişisel asistan çalışıyor: {adres}  (model: {aktif_model()}, kapatmak için Ctrl+C)")
     if "--pencere-acma" not in sys.argv:
         pencere_ac(adres)
     try:

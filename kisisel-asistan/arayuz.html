@@ -28,6 +28,7 @@
   main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
   .sekme { display: none; flex: 1; overflow: auto; padding: 12px 16px; }
   .sekme.acik { display: flex; flex-direction: column; }
+  #kisilik > *, #hafiza > * { flex-shrink: 0; }
   #mesajlar { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: 8px; }
   .msj { max-width: 88%; padding: 8px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line);
          white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -46,6 +47,11 @@
                 padding: 6px 0; border-bottom: 1px solid var(--line); }
   ul.kayit small { color: var(--muted); }
   .ipucu { color: var(--muted); font-size: 13px; }
+  .duzelt { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; white-space: normal; }
+  .istatistik { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .istatistik div { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .istatistik b { display: block; font-size: 20px; }
+  label { font-size: 13px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -82,9 +88,23 @@
   </section>
 
   <section id="kisilik" class="sekme">
-    <p class="ipucu">Asistanın karakteri, değerleri ve fikirleri. Burada yazdığın her şey onun nasıl düşündüğünü belirler.
-      Değişiklikler <b>yeni oturumda</b> geçerli olur.</p>
-    <textarea id="kisilikMetin" rows="20"></textarea>
+    <h3 style="margin-top:0">Modelin</h3>
+    <p class="ipucu" id="modelBilgi">Yükleniyor…</p>
+    <div class="istatistik" id="istatistik"></div>
+    <p class="ipucu">Her 👍, her düzeltme ve her elle eklediğin örnek, modelini eğitmek için kullanılır.
+      Yeterli örnek biriktiğinde (en az ~100, ideali 500+) <code>egitim/</code> klasöründeki adımlarla modelini yeniden eğit.</p>
+
+    <h3>Örnek öğret</h3>
+    <p class="ipucu">"Sana bu soruyu sorarsam böyle cevap ver" — fikirlerini ve üslubunu doğrudan öğret.</p>
+    <form id="ornekForm" style="display:flex;flex-direction:column;gap:6px">
+      <textarea id="ornekSoru" rows="2" placeholder="Soru (ör. Sence işimi bırakıp kendi işimi kurmalı mıyım?)"></textarea>
+      <textarea id="ornekCevap" rows="4" placeholder="İdeal cevap — asistanın tam olarak böyle cevap vermesini istiyorum"></textarea>
+      <div><button class="birincil">Örneği kaydet</button> <span class="ipucu" id="ornekDurum"></span></div>
+    </form>
+
+    <h3>Kişilik ve fikirler</h3>
+    <p class="ipucu">Asistanın karakteri, değerleri ve fikirleri. Değişiklikler <b>yeni oturumda</b> geçerli olur.</p>
+    <textarea id="kisilikMetin" rows="14"></textarea>
     <div style="margin-top:8px"><button class="birincil" id="kisilikKaydet">Kaydet ve yeni oturum başlat</button></div>
   </section>
 </main>
@@ -106,7 +126,7 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
   document.querySelectorAll(".sekme").forEach(s => s.classList.toggle("acik", s.id === b.dataset.sekme));
   if (b.dataset.sekme === "hafiza") hafizaYukle();
-  if (b.dataset.sekme === "kisilik") api("/api/kisilik").then(j => $("#kisilikMetin").value = j.metin);
+  if (b.dataset.sekme === "kisilik") egitimYukle();
 });
 
 function mesajEkle(metin, ben, sinif = "") {
@@ -118,18 +138,29 @@ function mesajEkle(metin, ben, sinif = "") {
   return d;
 }
 
-function geriBildirim(kutu, soru, cevap) {
+function geriBildirim(kutu, id) {
   const alt = document.createElement("div");
   alt.className = "alt";
   const iyi = Object.assign(document.createElement("button"), {textContent: "👍"});
   const kotu = Object.assign(document.createElement("button"), {textContent: "👎 Düzelt"});
-  iyi.onclick = () => { alt.textContent = "Teşekkürler 👍"; };
-  kotu.onclick = async () => {
-    const duzeltme = prompt("Bu cevapta neyi yanlış yaptı? Bundan sonra nasıl davranmalı?");
-    if (!duzeltme) return;
-    const ders = `"${soru.slice(0, 80)}" sorusuna verdiği cevap için kullanıcı şöyle dedi: ${duzeltme}`;
-    await api("/api/ders", {ders});
-    alt.textContent = "Ders kaydedildi — yeni oturumda uygulanacak.";
+  iyi.onclick = async () => { await api("/api/geri-bildirim", {id, iyi: true}); alt.textContent = "👍 Eğitim verisine eklendi."; };
+  kotu.onclick = () => {
+    alt.innerHTML = "";
+    const f = document.createElement("form");
+    f.className = "duzelt";
+    f.innerHTML = `<label>Bu cevap nasıl olmalıydı? (ideal cevabı yaz — model bundan öğrenir)</label>
+      <textarea name="ideal" rows="4"></textarea>
+      <label>Genel bir kural mı? (isteğe bağlı, hemen yeni oturumda uygulanır — ör. "Bana hiç liste yapma")</label>
+      <textarea name="kural" rows="1"></textarea>
+      <div><button class="birincil">Kaydet</button></div>`;
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const ideal = f.ideal.value.trim(), kural = f.kural.value.trim();
+      if (!ideal && !kural) return;
+      await api("/api/geri-bildirim", {id, ideal, kural});
+      alt.textContent = "Düzeltme kaydedildi — modelini eğittiğinde bundan öğrenecek.";
+    };
+    alt.appendChild(f);
   };
   alt.append(iyi, kotu);
   kutu.appendChild(alt);
@@ -145,13 +176,7 @@ async function gonder(metin) {
   try {
     const j = await api("/api/sohbet", {mesaj: metin});
     bekle.innerHTML = bicimle(j.cevap);
-    if (j.kaydedilenler.length) {
-      const not = document.createElement("div");
-      not.className = "alt";
-      not.textContent = "🧠 Hafızaya eklendi: " + j.kaydedilenler.join(" · ");
-      bekle.appendChild(not);
-    }
-    geriBildirim(bekle, metin, j.cevap);
+    geriBildirim(bekle, j.id);
   } catch (e) {
     bekle.classList.add("hata"); bekle.textContent = e.message;
   } finally {
@@ -192,6 +217,28 @@ $("#bilgiEkle").onsubmit = async e => {
   if (!bilgi) return;
   await api("/api/bilgi", {bilgi});
   $("#yeniBilgi").value = ""; hafizaYukle();
+};
+
+async function egitimYukle() {
+  api("/api/kisilik").then(j => $("#kisilikMetin").value = j.metin);
+  const d = await api("/api/egitim-durumu");
+  $("#modelBilgi").innerHTML = d.kendi_modelin_var
+    ? `Şu an <b>kendi eğittiğin modeli</b> kullanıyorsun (${esc(d.model)}).`
+    : `Şu an temel model kullanılıyor (<b>${esc(d.model)}</b>). Henüz kendi modelini eğitmedin.`;
+  const toplam = d.begenilen + d.duzeltilen + d.elle_ornek;
+  $("#istatistik").innerHTML = [["Eğitim örneği", toplam], ["Toplam cevap", d.toplam_cevap],
+    ["Beğenilen 👍", d.begenilen], ["Düzeltilen / elle", d.duzeltilen + " / " + d.elle_ornek]]
+    .map(([a, b]) => `<div>${a}<b>${b}</b></div>`).join("");
+}
+
+$("#ornekForm").onsubmit = async e => {
+  e.preventDefault();
+  const soru = $("#ornekSoru").value.trim(), cevap = $("#ornekCevap").value.trim();
+  if (!soru || !cevap) return;
+  await api("/api/ornek", {soru, cevap});
+  $("#ornekSoru").value = $("#ornekCevap").value = "";
+  $("#ornekDurum").textContent = "Kaydedildi.";
+  egitimYukle();
 };
 
 $("#kisilikKaydet").onclick = async () => {

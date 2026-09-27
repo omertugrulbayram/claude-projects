@@ -1,0 +1,8 @@
+# torch'u ekran kartına uygun kur (modeli_egit.bat / .sh bunu yapar), sonra:
+transformers>=5.0
+peft>=0.17
+trl>=1.0
+datasets
+accelerate
+sentencepiece
+protobuf

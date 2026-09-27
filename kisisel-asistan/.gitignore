@@ -1,3 +1,7 @@
 veri/
 __pycache__/
 .venv/
+egitim/.venv/
+egitim/veri.jsonl
+egitim/cikti/
+egitim/llama.cpp/
