@@ -4,5 +4,6 @@ peft>=0.17
 trl>=1.0
 datasets
 accelerate
+bitsandbytes>=0.45  # 8 GB kartlarda 4-bit eğitim (QLoRA)
 sentencepiece
 protobuf

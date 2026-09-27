@@ -3,5 +3,6 @@ __pycache__/
 .venv/
 egitim/.venv/
 egitim/veri.jsonl
+egitim/sinav.jsonl
 egitim/cikti/
 egitim/llama.cpp/

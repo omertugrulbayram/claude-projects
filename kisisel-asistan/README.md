@@ -43,30 +43,32 @@ olarak değiştirir.
 
 1. **Python 3.10+** kur: <https://www.python.org/downloads/> (Windows'ta kurarken *"Add Python to PATH"* kutusunu işaretle).
 2. **Ollama** kur: <https://ollama.com/download>. Modelleri bilgisayarında çalıştıran programdır.
-3. Temel modeli indir. Komut İstemi'ni aç ve şunu yaz (yaklaşık 2.5 GB):
-   ```
-   ollama pull qwen3:4b
-   ```
-4. Bu klasörü bilgisayarına indir.
+3. Bu klasörü bilgisayarına indir ve **`kurulum.bat`** dosyasına çift tıkla. Bu dosya:
+   - Python ve Ollama'nın kurulu olduğunu kontrol eder,
+   - temel modeli indirir (yaklaşık 2.5 GB),
+   - masaüstüne **Kişisel Asistan** kısayolu koyar,
+   - istersen bilgisayar açılınca asistanın otomatik başlamasını ayarlar.
 
 ## Çalıştırma
 
-- **Windows:** `baslat.bat` dosyasına çift tıkla.
-- **macOS / Linux:** `./baslat.sh`
-
+Masaüstündeki **Kişisel Asistan** kısayoluna çift tıkla (veya `baslat.bat`; macOS/Linux'ta `./baslat.sh`).
 Chrome veya Edge varsa asistan ayrı, küçük bir uygulama penceresinde açılır.
-
-**Bilgisayar açılınca otomatik başlasın:** `Win + R` tuşlarına bas, `shell:startup` yaz ve açılan
-klasöre `baslat.bat` için bir **kısayol** koy.
 
 ## Modelini eğitmek
 
 ### Gereken donanım
 
-| Temel model | Ekran kartı (NVIDIA) | Not |
+| Ekran kartı (NVIDIA) | Nasıl eğitilir | Not |
 |---|---|---|
-| `Qwen/Qwen3-4B-Instruct-2507` (varsayılan) | 16 GB+ VRAM (RTX 4080/4090/5080…) | En iyi kalite |
-| `Qwen/Qwen2.5-1.5B-Instruct` | 8 GB+ VRAM (RTX 3060/4060…) | Daha küçük kartlar için |
+| 14 GB altı: **RTX 5050**, 4060, 3060 (8 GB) | Qwen3 4B, **4-bit (QLoRA)** — otomatik seçilir | Hiçbir ayar gerekmez |
+| 16 GB+: RTX 4080/4090/5080… | Qwen3 4B, tam hassasiyet (LoRA) | Biraz daha hızlı ve kaliteli |
+
+**RTX 5050 (8 GB) için:** Varsayılan ayarlar sana göre. `egit.py` kartının belleğini algılar ve
+modeli 4-bit yükler; 4B model böylece 8 GB'a sığar. Tahmini süre: 300 örnekle 3 epoch yaklaşık
+30–60 dakika. RTX 50 serisi yeni olduğu için **NVIDIA sürücünü güncelle**
+(<https://www.nvidia.com/drivers>); eğitim kütüphanesi (PyTorch CUDA 13) güncel sürücü ister.
+Yine de bellek yetmezse (`CUDA out of memory` hatası) şunu dene:
+`egitim\modeli_egit.bat --max-uzunluk 2048`
 
 Ekran kartın yoksa eğitim işlemcide çok yavaş olur (günler sürebilir). Sadece sohbet için ekran
 kartı gerekmez; Ollama işlemcide de çalışır.
@@ -75,25 +77,28 @@ kartı gerekmez; Ollama işlemcide de çalışır.
 
 1. Asistanla konuş, 👍 ver, düzelt, **Eğitim** sekmesinde örnek ekle. Sayacı aynı sekmede görürsün.
 2. Asistanı kapat, sonra `egitim\modeli_egit.bat` dosyasına çift tıkla.
-   Daha küçük ekran kartı için Komut İstemi'nde şunu çalıştır:
-   ```
-   egitim\modeli_egit.bat --temel Qwen/Qwen2.5-1.5B-Instruct
-   ```
    İlk çalıştırmada gerekli kütüphaneler (~5 GB) ve temel modelin ağırlıkları indirilir.
    Toplam süre, örnek sayısına göre birkaç dakika ile bir saat arasındadır.
-3. Bittiğinde asistanı yeniden başlat. Eğitim sekmesinde *"kendi eğittiğin modeli kullanıyorsun"* yazar.
+3. Eğitim bitince tarayıcıda bir **model sınavı** açılır. Modelin eğitimde hiç görmediği sorular,
+   hem eski hem yeni modele sorulur ve cevaplar hangisinin hangi modelden geldiği gizlenerek yan
+   yana gösterilir. Sen daha iyisini seçersin, sonunda sonuç açıklanır. Böylece eğitimin gerçekten
+   işe yarayıp yaramadığını objektif olarak görürsün. (Sınav için en az 30 eğitim örneği gerekir.)
+4. Asistanı yeniden başlat. Eğitim sekmesinde *"kendi eğittiğin modeli kullanıyorsun"* yazar.
 
-`modeli_egit.bat` üç adımı sırayla çalıştırır. İstersen adımları tek tek de çalıştırabilirsin:
+`modeli_egit.bat` dört adımı sırayla çalıştırır. İstersen adımları tek tek de çalıştırabilirsin:
 
 | Adım | Komut | Ne yapar |
 |---|---|---|
 | 1 | `python egitim/veri_hazirla.py` | 👍, düzeltmeler ve elle örneklerden `egitim/veri.jsonl` dosyasını oluşturur |
 | 2 | `python egitim/egit.py` | LoRA ile ince ayar yapar ve modeli `egitim/cikti/birlesik` klasörüne kaydeder |
 | 3 | `python egitim/ollamaya_yukle.py` | Modeli GGUF biçimine çevirir, sıkıştırır ve Ollama'ya `benim-asistanim` adıyla yükler |
+| 4 | `python egitim/karsilastir.py` | Eski ve yeni modeli kör karşılaştırmayla sınar |
 
 `egit.py` ayarları: `--epoch` (varsayılan 3), `--lora-r` (varsayılan 16; büyüdükçe model daha çok
 değişir), `--ogrenme-hizi`. Model verini ezberlemeye başlarsa (aynı cümleleri tekrar ederse)
-`--epoch 2` ile yeniden dene.
+`--epoch 2` ile yeniden dene. `--nicemleme 4bit|yok` ile 4-bit modunu elle seçebilirsin.
+
+Sıradaki özellikler için: [ROADMAP.md](ROADMAP.md)
 
 ### İyi eğitim için ipuçları
 
