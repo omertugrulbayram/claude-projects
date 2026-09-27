@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kişisel Asistan</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --text: #1f1f1d; --muted: #6b6a66;
+    --line: #e3e1dc; --accent: #2f6f5e; --accent-text: #ffffff; --me: #e8f0ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --panel: #1f1f1d; --text: #ecebe7; --muted: #9b9a95;
+      --line: #33322f; --accent: #5fb39a; --accent-text: #0f1f1a; --me: #243029;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+         height: 100vh; display: flex; flex-direction: column; }
+  nav { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  nav button { flex: 1; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+           border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+  button.on, button.birincil { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  .sekme { display: none; flex: 1; overflow: auto; padding: 12px 16px; }
+  .sekme.acik { display: flex; flex-direction: column; }
+  #mesajlar { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: 8px; }
+  .msj { max-width: 88%; padding: 8px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line);
+         white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msj.ben { align-self: flex-end; background: var(--me); }
+  .msj .alt { display: flex; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--muted); align-items: center; flex-wrap: wrap; }
+  .msj .alt button { padding: 1px 8px; font-size: 12px; }
+  .hata { color: #c0392b; }
+  .hizli { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  .hizli button { font-size: 13px; }
+  form#yaz { display: flex; gap: 8px; }
+  textarea { font: inherit; width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px;
+             background: var(--panel); color: var(--text); resize: vertical; }
+  h3 { margin: 16px 0 6px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  ul.kayit { list-style: none; padding: 0; margin: 0; }
+  ul.kayit li { display: flex; gap: 8px; justify-content: space-between; align-items: flex-start;
+                padding: 6px 0; border-bottom: 1px solid var(--line); }
+  ul.kayit small { color: var(--muted); }
+  .ipucu { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<nav>
+  <button data-sekme="sohbet" class="on">Sohbet</button>
+  <button data-sekme="hafiza">Hafıza</button>
+  <button data-sekme="kisilik">Eğitim</button>
+</nav>
+<main>
+  <section id="sohbet" class="sekme acik">
+    <div id="mesajlar"></div>
+    <div class="hizli">
+      <button data-hizli="Bugün nasıl geçti, benimle kısa bir günlük check-in yapar mısın? Bana 3 soru sor.">Günlük check-in</button>
+      <button data-hizli="Hafızandaki her şeye dayanarak beni objektif olarak analiz et: güçlü yanlarım, kör noktalarım, tekrar eden örüntülerim. Gözlem ile yorumu ayır, veri eksikse söyle.">Beni analiz et</button>
+      <button data-hizli="Beni tanıdığın kadarıyla bu hafta odaklanmam gereken en önemli 3 şeyi ve somut adımlarını öner.">Öneri ver</button>
+      <button data-hizli="Beni daha iyi tanıman için bana 5 derin soru sor, tek tek.">Beni tanı</button>
+      <button id="yeni">Yeni oturum</button>
+    </div>
+    <form id="yaz">
+      <textarea id="girdi" rows="2" placeholder="Yaz… (Enter gönderir, Shift+Enter yeni satır)"></textarea>
+      <button class="birincil" id="gonder">Gönder</button>
+    </form>
+  </section>
+
+  <section id="hafiza" class="sekme">
+    <p class="ipucu">Asistanın senin hakkında bildikleri. Yanlış olanı sil, eksik olanı ekle.</p>
+    <form id="bilgiEkle" style="display:flex;gap:8px">
+      <textarea id="yeniBilgi" rows="1" placeholder="Kendin hakkında bir bilgi ekle…"></textarea>
+      <button class="birincil">Ekle</button>
+    </form>
+    <h3>Senin hakkında bildikleri</h3><ul class="kayit" id="bilgiler"></ul>
+    <h3>Kendi görüşleri</h3><ul class="kayit" id="gorusler"></ul>
+    <h3>Senin düzeltmelerin (dersler)</h3><ul class="kayit" id="dersler"></ul>
+  </section>
+
+  <section id="kisilik" class="sekme">
+    <p class="ipucu">Asistanın karakteri, değerleri ve fikirleri. Burada yazdığın her şey onun nasıl düşündüğünü belirler.
+      Değişiklikler <b>yeni oturumda</b> geçerli olur.</p>
+    <textarea id="kisilikMetin" rows="20"></textarea>
+    <div style="margin-top:8px"><button class="birincil" id="kisilikKaydet">Kaydet ve yeni oturum başlat</button></div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = t => t.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const bicimle = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+
+async function api(yol, govde) {
+  const r = await fetch(yol, govde === undefined ? {} :
+    {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(govde)});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.hata || "Bilinmeyen hata");
+  return j;
+}
+
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".sekme").forEach(s => s.classList.toggle("acik", s.id === b.dataset.sekme));
+  if (b.dataset.sekme === "hafiza") hafizaYukle();
+  if (b.dataset.sekme === "kisilik") api("/api/kisilik").then(j => $("#kisilikMetin").value = j.metin);
+});
+
+function mesajEkle(metin, ben, sinif = "") {
+  const d = document.createElement("div");
+  d.className = "msj " + (ben ? "ben " : "") + sinif;
+  d.innerHTML = bicimle(metin);
+  $("#mesajlar").appendChild(d);
+  $("#mesajlar").scrollTop = 1e9;
+  return d;
+}
+
+function geriBildirim(kutu, soru, cevap) {
+  const alt = document.createElement("div");
+  alt.className = "alt";
+  const iyi = Object.assign(document.createElement("button"), {textContent: "👍"});
+  const kotu = Object.assign(document.createElement("button"), {textContent: "👎 Düzelt"});
+  iyi.onclick = () => { alt.textContent = "Teşekkürler 👍"; };
+  kotu.onclick = async () => {
+    const duzeltme = prompt("Bu cevapta neyi yanlış yaptı? Bundan sonra nasıl davranmalı?");
+    if (!duzeltme) return;
+    const ders = `"${soru.slice(0, 80)}" sorusuna verdiği cevap için kullanıcı şöyle dedi: ${duzeltme}`;
+    await api("/api/ders", {ders});
+    alt.textContent = "Ders kaydedildi — yeni oturumda uygulanacak.";
+  };
+  alt.append(iyi, kotu);
+  kutu.appendChild(alt);
+}
+
+let mesgul = false;
+async function gonder(metin) {
+  metin = metin.trim();
+  if (!metin || mesgul) return;
+  mesgul = true; $("#gonder").disabled = true;
+  mesajEkle(metin, true);
+  const bekle = mesajEkle("Düşünüyor…", false);
+  try {
+    const j = await api("/api/sohbet", {mesaj: metin});
+    bekle.innerHTML = bicimle(j.cevap);
+    if (j.kaydedilenler.length) {
+      const not = document.createElement("div");
+      not.className = "alt";
+      not.textContent = "🧠 Hafızaya eklendi: " + j.kaydedilenler.join(" · ");
+      bekle.appendChild(not);
+    }
+    geriBildirim(bekle, metin, j.cevap);
+  } catch (e) {
+    bekle.classList.add("hata"); bekle.textContent = e.message;
+  } finally {
+    mesgul = false; $("#gonder").disabled = false; $("#girdi").focus();
+  }
+}
+
+$("#yaz").onsubmit = e => { e.preventDefault(); const m = $("#girdi").value; $("#girdi").value = ""; gonder(m); };
+$("#girdi").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#yaz").requestSubmit(); } };
+document.querySelectorAll("[data-hizli]").forEach(b => b.onclick = () => gonder(b.dataset.hizli));
+$("#yeni").onclick = async () => {
+  await api("/api/yeni-oturum", {});
+  $("#mesajlar").innerHTML = "";
+  mesajEkle("Yeni oturum başladı. Güncel hafıza ve eğitim yüklendi.", false);
+};
+
+async function hafizaYukle() {
+  const h = await api("/api/hafiza");
+  const doldur = (id, tur, liste, alan) => {
+    const ul = $("#" + id); ul.innerHTML = "";
+    if (!liste.length) ul.innerHTML = '<li class="ipucu">Henüz yok.</li>';
+    [...liste].reverse().forEach(k => {
+      const li = document.createElement("li");
+      li.innerHTML = `<span>${esc(k[alan])}<br><small>${esc(k.kategori ? k.kategori + " · " : "")}${esc(k.tarih)}</small></span>`;
+      const sil = Object.assign(document.createElement("button"), {textContent: "Sil"});
+      sil.onclick = async () => { await api("/api/sil", {tur, id: k.id}); hafizaYukle(); };
+      li.appendChild(sil); ul.appendChild(li);
+    });
+  };
+  doldur("bilgiler", "bilgiler", h.bilgiler, "bilgi");
+  doldur("gorusler", "gorusler", h.gorusler, "gorus");
+  doldur("dersler", "dersler", h.dersler, "ders");
+}
+
+$("#bilgiEkle").onsubmit = async e => {
+  e.preventDefault();
+  const bilgi = $("#yeniBilgi").value.trim();
+  if (!bilgi) return;
+  await api("/api/bilgi", {bilgi});
+  $("#yeniBilgi").value = ""; hafizaYukle();
+};
+
+$("#kisilikKaydet").onclick = async () => {
+  await api("/api/kisilik", {metin: $("#kisilikMetin").value});
+  await api("/api/yeni-oturum", {});
+  $("#mesajlar").innerHTML = "";
+  mesajEkle("Eğitim kaydedildi, yeni oturum başladı.", false);
+  document.querySelector('nav button[data-sekme="sohbet"]').click();
+};
+
+mesajEkle("Merhaba! Ben senin kişisel asistanınım. Seni tanıdıkça daha iyi analiz ve öneri yapacağım. " +
+          "Başlamak için \"Beni tanı\" butonuna basabilirsin.", false);
+</script>
+</body>
+</html>
